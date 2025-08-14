@@ -35,7 +35,7 @@ public class Account {
     @Column(nullable = false, precision = 16, scale = 2)
     private BigDecimal balance = BigDecimal.ZERO;
 
-    @Column(nullable = false, unique = true)
+    @Lob
     private String qrCodehash;
 
     @Lob

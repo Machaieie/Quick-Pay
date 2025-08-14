@@ -26,12 +26,11 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
-
 @Getter
 @Setter
 @Entity
-@Table(name ="User")
-public class User implements UserDetails{
+@Table(name = "User")
+public class User implements UserDetails {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -39,28 +38,23 @@ public class User implements UserDetails{
     private String fullName;
 
     @Column(unique = true, nullable = false)
-    private String phone; 
+    private String phone;
 
     @Column(unique = true, nullable = false)
     private String email;
 
     private String username;
 
-    private String password; 
+    private String password;
 
     private String pin;
 
     @OneToMany(mappedBy = "user")
     private List<Token> tokens;
-    
-    @OneToMany(
-        mappedBy = "user", 
-        cascade = CascadeType.ALL,
-        orphanRemoval = true,  
-        fetch = FetchType.LAZY
-    )
+
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<Account> accounts = new ArrayList<>();
-    
+
     @Enumerated(value = EnumType.STRING)
     private Role role;
 
@@ -69,11 +63,16 @@ public class User implements UserDetails{
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority(role.name()));
     }
 
-    
+    private int failedAttempts = 0;
+
+    public boolean isBlocked() {
+        return this.userState == UserState.BLOCKED;
+    }
+
 }

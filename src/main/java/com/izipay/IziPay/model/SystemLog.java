@@ -2,7 +2,11 @@ package com.izipay.IziPay.model;
 
 import java.time.LocalDateTime;
 
+import com.izipay.IziPay.model.enums.SystemAction;
+
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -20,7 +24,8 @@ public class SystemLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String action;
+    @Enumerated(EnumType.STRING)
+    private SystemAction action;
     private String details;
 
     @ManyToOne

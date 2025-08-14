@@ -1,0 +1,13 @@
+package com.izipay.IziPay.model.enums;
+
+public enum SystemAction {
+    REGISTER,
+    LOGIN_SUCCESS,
+    LOGIN_FAILED,
+    PIN_RESET,
+    ACCOUNT_CREATED,
+    PASSWORD_CHANGED,
+    LOGOUT,
+    QR_CODE_GENERATED,
+    USER_BLOCKED
+}

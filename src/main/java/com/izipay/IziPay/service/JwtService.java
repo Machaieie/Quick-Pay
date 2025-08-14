@@ -1,64 +1,31 @@
 package com.izipay.IziPay.service;
 
-import java.util.Date;
-import java.util.function.Function;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import javax.crypto.SecretKey;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
-
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
 import com.izipay.IziPay.model.User;
-import com.izipay.IziPay.repository.TokenRepository;
+
+import java.util.Date;
+import java.util.function.Function;
+
+import javax.crypto.SecretKey;
 
 @Service
 public class JwtService {
 
-    @Value("${application.security.jwt.secret-key}")
-    private String secretKey;
-
-    @Value("${application.security.jwt.access-token-expiration}")
-    private long accessTokenExpire;
-
-    @Value("${application.security.jwt.refresh-token-expiration}")
-    private long refreshTokenExpire;
-
-
-    private final TokenRepository tokenRepository;
-
-    public JwtService(TokenRepository tokenRepository) {
-        this.tokenRepository = tokenRepository;
-    }
+    private final String SECRECT_KEY = "L7KKytHmAdCo6OTGykv6rMnD9T/+J5QHBp55IAQztI8=";
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 
-
-    public boolean isValid(String token, UserDetails user) {
+    public boolean isValid(String token, UserDetails usuario) {
         String username = extractUsername(token);
-
-        boolean validToken = tokenRepository
-                .findByAccessToken(token)
-                .map(t -> !t.isLoggedOut())
-                .orElse(false);
-
-        return (username.equals(user.getUsername())) && !isTokenExpired(token) && validToken;
-    }
-
-    public boolean isValidRefreshToken(String token, User user) {
-        String username = extractUsername(token);
-
-        boolean validRefreshToken = tokenRepository
-                .findByRefreshToken(token)
-                .map(t -> !t.isLoggedOut())
-                .orElse(false);
-
-        return (username.equals(user.getUsername())) && !isTokenExpired(token) && validRefreshToken;
+        return username.equals(usuario.getUsername()) && !isTokenExpired(token);
     }
 
     private boolean isTokenExpired(String token) {
@@ -75,37 +42,47 @@ public class JwtService {
     }
 
     private Claims extractAllClaims(String token) {
-        return Jwts
-                .parser()
+        return Jwts.parser()
                 .verifyWith(getSigninKey())
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
     }
 
-
-    public String generateAccessToken(User user) {
-        return generateToken(user, accessTokenExpire);
-    }
-
-    public String generateRefreshToken(User user) {
-        return generateToken(user, refreshTokenExpire );
-    }
-
-    private String generateToken(User user, long expireTime) {
-        String token = Jwts
-                .builder()
-                .subject(user.getUsername())
+    public String generateToken(User usuario) {
+        return Jwts.builder()
+                .subject(usuario.getUsername())
                 .issuedAt(new Date(System.currentTimeMillis()))
-                .expiration(new Date(System.currentTimeMillis() + expireTime ))
+                .expiration(new Date(System.currentTimeMillis() + 24 * 60 * 60 * 1000)) // 24 horas
                 .signWith(getSigninKey())
                 .compact();
+    }
 
-        return token;
+    public String generateAccessToken(User usuario) {
+        return Jwts.builder()
+                .subject(usuario.getUsername())
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + (15 * 60 * 1000))) // 15 minutos
+                .signWith(getSigninKey())
+                .compact();
+    }
+
+    public String generateRefreshToken(User usuario) {
+        return Jwts.builder()
+                .subject(usuario.getUsername())
+                .issuedAt(new Date(System.currentTimeMillis()))
+                .expiration(new Date(System.currentTimeMillis() + (7L * 24 * 60 * 60 * 1000))) 
+                .signWith(getSigninKey())
+                .compact();
+    }
+
+    public boolean isValidRefreshToken(String token, User usuario) {
+        String username = extractUsername(token);
+        return username.equals(usuario.getUsername()) && !isTokenExpired(token);
     }
 
     private SecretKey getSigninKey() {
-        byte[] keyBytes = Decoders.BASE64URL.decode(secretKey);
+        byte[] keyBytes = Decoders.BASE64.decode(SECRECT_KEY);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }

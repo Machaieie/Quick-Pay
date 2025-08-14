@@ -2,8 +2,10 @@ package com.izipay.IziPay.service;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,22 +13,31 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import com.google.zxing.WriterException;
+import com.izipay.IziPay.aspect.LogAction;
+import com.izipay.IziPay.exceptions.InvalidCredentialsException;
+import com.izipay.IziPay.exceptions.UserBlockedException;
 import com.izipay.IziPay.exceptions.UserExistsException;
+import com.izipay.IziPay.exceptions.UserNotFoundException;
 import com.izipay.IziPay.model.Account;
 import com.izipay.IziPay.model.LoginAttempt;
+import com.izipay.IziPay.model.SystemLog;
 import com.izipay.IziPay.model.Token;
 import com.izipay.IziPay.model.User;
+import com.izipay.IziPay.model.dto.request.LoginRequestDTO;
 import com.izipay.IziPay.model.dto.request.RegisterRequestDTO;
 import com.izipay.IziPay.model.dto.response.AuthenticationResponse;
 import com.izipay.IziPay.model.enums.AttemptStatus;
+import com.izipay.IziPay.model.enums.SystemAction;
 import com.izipay.IziPay.model.enums.UserState;
 import com.izipay.IziPay.repository.AccountRepository;
 import com.izipay.IziPay.repository.LoginAttemptRepository;
+import com.izipay.IziPay.repository.SystemLogRepository;
 import com.izipay.IziPay.repository.TokenRepository;
 import com.izipay.IziPay.repository.UserRepository;
 
@@ -50,6 +61,9 @@ public class AuthenticationService {
     private JwtService jwtService;
 
     @Autowired
+    private EmailService emailService;
+
+    @Autowired
     private QRCodeService qrCodeService;
     @Autowired
     private TokenRepository tokenRepository;
@@ -59,6 +73,7 @@ public class AuthenticationService {
     @Autowired
     private LoginAttemptRepository loginAttemptRepository;
 
+    @LogAction(action = SystemAction.REGISTER, details = "Usuário registrado com sucesso")
     @Transactional
     public AuthenticationResponse register(RegisterRequestDTO request) {
         if (userRepository.existsByEmail(request.email())) {
@@ -69,31 +84,46 @@ public class AuthenticationService {
             throw new UserExistsException("Phone number already registered");
         }
 
-        if (userRepository.existsByUsername(request.username())) {
-            throw new UserExistsException("Username already taken");
-        }
-
+        String accountNumber = generateUniqueAccountNumber();
+        String pin = generatePin();
         User user = new User();
         user.setFullName(request.fullName());
         user.setPhone(request.phone());
         user.setEmail(request.email());
-        user.setUsername(request.username());
-        user.setPassword(passwordEncoder.encode(request.password()));
-        user.setPin(passwordEncoder.encode(request.pin()));
+        user.setUsername(accountNumber);
+        user.setPassword(passwordEncoder.encode(pin));
+        user.setPin(passwordEncoder.encode(pin));
         user.setRole(request.role());
-        user.setUserState(UserState.ATIVO);
+        user.setUserState(UserState.ACTIVE);
         user.setCreatedAt(LocalDateTime.now());
 
+        // Salva o usuário
         user = userRepository.save(user);
 
+        Account account;
         try {
-            Account account = createAccountForUser(user);
+            account = createAccountForUser(user, accountNumber);
             accountRepository.save(account);
         } catch (WriterException | IOException e) {
             throw new RuntimeException("Error generating QR Code", e);
         }
 
-        String accessToken = jwtService.generateAccessToken(user);
+        // Enviar email com os dados de login
+        String emailBody = """
+                <p>Olá %s,</p>
+                <p>Seja bem-vindo à IziPay! Seus dados de login foram criados com sucesso.</p>
+                <ul>
+                    <li><b>Número da Conta:</b> %s</li>
+                    <li><b>PIN:</b> %s</li>
+                </ul>
+                <p>Use esses dados para acessar seu perfil no aplicativo. Recomendamos alterar seu PIN após o primeiro login.</p>
+                """
+                .formatted(user.getFullName(), accountNumber, pin);
+
+        emailService.send(user.getEmail(), "Bem-vindo à IziPay - Seus dados de login", emailBody);
+
+        // Gerar tokens
+        String accessToken = jwtService.generateToken(user);
         String refreshToken = jwtService.generateRefreshToken(user);
 
         return new AuthenticationResponse(
@@ -102,17 +132,16 @@ public class AuthenticationService {
                 "User registered successfully");
     }
 
-    private Account createAccountForUser(User user) throws WriterException, IOException {
+    private Account createAccountForUser(User user, String userAccount) throws WriterException, IOException {
         Account account = new Account();
         account.setUser(user);
 
-        String accountNumber = generateUniqueAccountNumber();
-        account.setAccountNumber(accountNumber);
+        account.setAccountNumber(userAccount);
         account.setBalance(BigDecimal.ZERO);
 
-        String qrCodeBase64 = qrCodeService.generateQRCodeBase64(accountNumber);
+        String qrCodeBase64 = qrCodeService.generateQRCodeBase64(userAccount);
         account.setQrCodehash(qrCodeBase64);
-
+        account.setQrCodeImage(qrCodeBase64);
         account.setCreatedAt(LocalDateTime.now());
         return account;
     }
@@ -128,29 +157,49 @@ public class AuthenticationService {
         return accountNumber;
     }
 
-    public AuthenticationResponse authenticate(User request, String ipAddress, String deviceInfo) {
+   @LogAction(action = SystemAction.LOGIN_SUCCESS, details = "Login bem-sucedido")
+public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO ,HttpServletRequest httpRequest) {
     boolean success = false;
-    User user = null;
+
+    User user = userRepository.findByUsername(loginRequestDTO.username())
+            .orElseThrow(() -> new UserNotFoundException("User not found"));
+
+    if (user.isBlocked()) {
+        throw new UserBlockedException("Account is blocked due to multiple failed login attempts");
+    }
+
+    String ipAddress = httpRequest.getRemoteAddr();
+    String deviceInfo = httpRequest.getHeader("User-Agent");
 
     try {
         authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getUsername(),
-                        request.getPassword()));
+                new UsernamePasswordAuthenticationToken(loginRequestDTO.username(), loginRequestDTO.password()));
 
-        user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow();
+        user.setFailedAttempts(0);
+        userRepository.save(user);
 
-        success = true; // Se passou pela autenticação sem exceção
-        String accessToken = jwtService.generateAccessToken(user);
+        success = true;
+
+        String accessToken = jwtService.generateToken(user);
         String refreshToken = jwtService.generateRefreshToken(user);
 
         revokeAllTokenByUser(user);
         saveUserToken(accessToken, refreshToken, user);
 
-        return new AuthenticationResponse(accessToken, refreshToken, "User login was successful");
+        return new AuthenticationResponse(accessToken, refreshToken, "User login successful");
 
+    } catch (BadCredentialsException ex) {
+        int attempts = user.getFailedAttempts() + 1;
+        user.setFailedAttempts(attempts);
+
+        if (attempts >= 3) {
+            user.setUserState(UserState.BLOCKED);
+        }
+
+        userRepository.save(user);
+        throw new InvalidCredentialsException("Invalid username or password");
     } finally {
+        // registra tentativas de login
         LoginAttempt attempt = new LoginAttempt();
         attempt.setUser(user);
         attempt.setStatus(success ? AttemptStatus.SUCCESS : AttemptStatus.FAILED);
@@ -214,4 +263,35 @@ public class AuthenticationService {
         return new ResponseEntity(HttpStatus.UNAUTHORIZED);
 
     }
+
+    @LogAction(action = SystemAction.PIN_RESET, details = "PIN redefinido")
+    @Transactional
+    public String resetPinByEmail(String email) {
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isEmpty()) {
+            throw new IllegalArgumentException("E-mail não encontrado");
+        }
+
+        User user = userOpt.get();
+        String newPin = generatePin();
+        user.setPin(passwordEncoder.encode(newPin));
+        userRepository.save(user);
+
+        String emailBody = """
+                    <p>Seu PIN foi redefinido com sucesso.</p>
+                    <p><b>Novo PIN:</b> %s</p>
+                    <p>Use-o para fazer login e altere-o depois.</p>
+                """.formatted(newPin);
+
+        emailService.send(user.getEmail(), "Redefinição de PIN", emailBody);
+
+        return "Novo PIN enviado para o e-mail";
+    }
+
+    private String generatePin() {
+        SecureRandom random = new SecureRandom();
+        int pin = random.nextInt(9000) + 1000;
+        return String.valueOf(pin);
+    }
+
 }
