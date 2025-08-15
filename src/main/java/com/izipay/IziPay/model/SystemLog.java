@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 
 import com.izipay.IziPay.model.enums.SystemAction;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -24,6 +25,7 @@ public class SystemLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(length = 50)
     @Enumerated(EnumType.STRING)
     private SystemAction action;
     private String details;

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.izipay.IziPay.model.QrTransactionToken;
 import com.izipay.IziPay.model.Transaction;
 import com.izipay.IziPay.model.dto.request.PaymentRequestDTO;
+import com.izipay.IziPay.model.dto.response.PaymentResponseDTO;
 import com.izipay.IziPay.model.dto.response.QrTransactionTokenResponse;
 import com.izipay.IziPay.service.TransactionService;
 
@@ -24,16 +25,15 @@ public class TransationController {
 
   
     @PostMapping("/pay")
-    public ResponseEntity<Transaction> makePayment(@RequestBody PaymentRequestDTO request) {
-        Transaction transaction = transactionService.makePayment(request);
+    public ResponseEntity<PaymentResponseDTO> makePayment(@RequestBody PaymentRequestDTO request) {
+        PaymentResponseDTO transaction = transactionService.makePayment(request);
         return ResponseEntity.ok(transaction);
     }
 
     @PostMapping("/generate-qr")
     public ResponseEntity<QrTransactionTokenResponse> generateQr(
-            @RequestParam String username,
-            @RequestParam(required = false) BigDecimal amount) {
-        QrTransactionTokenResponse token = transactionService.generatePaymentQrCode(username, amount);
+            @RequestParam String username) {
+        QrTransactionTokenResponse token = transactionService.generatePaymentQrCode(username);
         return ResponseEntity.ok(token);
     }
 }

@@ -1,13 +1,16 @@
 package com.izipay.IziPay.service;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.google.zxing.WriterException;
 import com.izipay.IziPay.aspect.LogAction;
 import com.izipay.IziPay.exceptions.InvalidQrCodeException;
 import com.izipay.IziPay.exceptions.UserNotFoundException;
@@ -16,6 +19,7 @@ import com.izipay.IziPay.model.QrTransactionToken;
 import com.izipay.IziPay.model.Transaction;
 import com.izipay.IziPay.model.User;
 import com.izipay.IziPay.model.dto.request.PaymentRequestDTO;
+import com.izipay.IziPay.model.dto.response.PaymentResponseDTO;
 import com.izipay.IziPay.model.dto.response.QrTransactionTokenResponse;
 import com.izipay.IziPay.model.enums.SystemAction;
 import com.izipay.IziPay.model.enums.TransationStatus;
@@ -42,9 +46,14 @@ public class TransactionService {
     @Autowired
     private TransactionRepository transactionRepository;
 
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    @Autowired
+    private QRCodeService qrCodeService;
+
     @LogAction(action = SystemAction.TRANSATION_SUCESSFULLY, details = "Transacao efectuada com sucesso")
     @Transactional
-    public Transaction makePayment(PaymentRequestDTO request) {
+    public PaymentResponseDTO makePayment(PaymentRequestDTO request) {
         log.info("Iniciando transação do usuário '{}' para QR Token '{}', valor: {}",
                 request.senderUsername(), request.qrToken(), request.amount());
 
@@ -54,7 +63,7 @@ public class TransactionService {
                     return new UserNotFoundException("Remetente não encontrado");
                 });
 
-        if (!sender.getPin().equals(request.pin())) {
+        if (!passwordEncoder.matches(request.pin(), sender.getPin())) {
             log.warn("PIN incorreto para usuário '{}'", sender.getUsername());
             throw new RuntimeException("PIN incorreto");
         }
@@ -73,9 +82,6 @@ public class TransactionService {
         Account recipientAccount = qrToken.getAccount();
         Account senderAccount = sender.getAccount();
 
-        log.debug("Saldo remetente antes da transação: {}", senderAccount.getBalance());
-        log.debug("Saldo destinatário antes da transação: {}", recipientAccount.getBalance());
-
         if (senderAccount.getBalance().compareTo(request.amount()) < 0) {
             log.warn("Saldo insuficiente. Saldo atual: {}, Valor solicitado: {}",
                     senderAccount.getBalance(), request.amount());
@@ -90,7 +96,6 @@ public class TransactionService {
 
         qrToken.setUsed(true);
         qrTokenRepository.save(qrToken);
-        log.info("QR Token '{}' consumido e marcado como usado", request.qrToken());
 
         Transaction transaction = new Transaction();
         transaction.setSender(senderAccount);
@@ -102,45 +107,51 @@ public class TransactionService {
 
         transactionRepository.save(transaction);
 
-        log.info("Transação concluída com sucesso. Referência: {}", transaction.getReference());
-        log.debug("Saldo remetente após transação: {}", senderAccount.getBalance());
-        log.debug("Saldo destinatário após transação: {}", recipientAccount.getBalance());
-
-        return transaction;
+        return new PaymentResponseDTO("Pagamento realizado com sucesso.");
     }
 
     /**
      * Gera um QR Code (token) para recebimento de pagamentos.
+     * 
      * @param username nome de usuário do receptor
-     * @param amount valor esperado (opcional, pode ser null para flexível)
+     * @param amount   valor esperado (opcional, pode ser null para flexível)
      * @return token gerado
      */
-   @Transactional
-public QrTransactionTokenResponse generatePaymentQrCode(String username, BigDecimal amount) {
-    log.info("Gerando QR Code de pagamento para usuário '{}'", username);
+    @Transactional
+    public QrTransactionTokenResponse generatePaymentQrCode(String username) {
+        log.info("Gerando QR Code de pagamento para usuário '{}'", username);
 
-    User user = userRepository.findByUsername(username)
-            .orElseThrow(() -> {
-                log.error("Usuário '{}' não encontrado para gerar QR Code", username);
-                return new UserNotFoundException("Usuário não encontrado");
-            });
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> {
+                    log.error("Usuário '{}' não encontrado para gerar QR Code", username);
+                    return new UserNotFoundException("Usuário não encontrado");
+                });
 
-    QrTransactionToken token = new QrTransactionToken();
-    token.setToken(UUID.randomUUID().toString());
-    token.setAccount(user.getAccount());
-    token.setUsed(false);
-    token.setCreatedAt(LocalDateTime.now());
-    token.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        QrTransactionToken token = new QrTransactionToken();
+        token.setToken(UUID.randomUUID().toString());
+        token.setAccount(user.getAccount());
+        token.setUsed(false);
+        token.setCreatedAt(LocalDateTime.now());
+        token.setExpiresAt(LocalDateTime.now().plusMinutes(5));
 
-    qrTokenRepository.save(token);
+        qrTokenRepository.save(token);
 
-    log.info("QR Code gerado com sucesso. Token: {}", token.getToken());
+        log.info("QR Code gerado com sucesso. Token: {}", token.getToken());
 
-    return new QrTransactionTokenResponse(
-            token.getToken(),
-            token.getCreatedAt(),
-            token.getExpiresAt()
-    );
-}
-   
+     
+        String qrCodeBase64 = "";
+        try {
+            qrCodeBase64 = qrCodeService.generateQRCodeBase64(token.getToken());
+        } catch (WriterException | IOException e) {
+            log.error("Erro ao gerar QR Code em Base64", e);
+        }
+
+        return new QrTransactionTokenResponse(
+                token.getToken(),
+                qrCodeBase64,
+                token.getCreatedAt(),
+                token.getExpiresAt()
+                );
+    }
+
 }
