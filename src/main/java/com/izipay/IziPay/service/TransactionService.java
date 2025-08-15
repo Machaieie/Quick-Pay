@@ -5,13 +5,20 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import javax.security.auth.login.AccountNotFoundException;
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.google.zxing.WriterException;
 import com.izipay.IziPay.aspect.LogAction;
+import com.izipay.IziPay.exceptions.AmountExceedsLimitException;
+import com.izipay.IziPay.exceptions.InsufficientBalanceException;
+import com.izipay.IziPay.exceptions.InvalidPinException;
 import com.izipay.IziPay.exceptions.InvalidQrCodeException;
 import com.izipay.IziPay.exceptions.UserNotFoundException;
 import com.izipay.IziPay.model.Account;
@@ -19,6 +26,7 @@ import com.izipay.IziPay.model.QrTransactionToken;
 import com.izipay.IziPay.model.Transaction;
 import com.izipay.IziPay.model.User;
 import com.izipay.IziPay.model.dto.request.PaymentRequestDTO;
+import com.izipay.IziPay.model.dto.request.TransferRequestDTO;
 import com.izipay.IziPay.model.dto.response.PaymentResponseDTO;
 import com.izipay.IziPay.model.dto.response.QrTransactionTokenResponse;
 import com.izipay.IziPay.model.enums.SystemAction;
@@ -51,15 +59,24 @@ public class TransactionService {
     @Autowired
     private QRCodeService qrCodeService;
 
+    private final BigDecimal MAX_VALUE = new BigDecimal("9999999999999999");
+
     @LogAction(action = SystemAction.TRANSATION_SUCESSFULLY, details = "Transacao efectuada com sucesso")
     @Transactional
     public PaymentResponseDTO makePayment(PaymentRequestDTO request) {
-        log.info("Iniciando transação do usuário '{}' para QR Token '{}', valor: {}",
-                request.senderUsername(), request.qrToken(), request.amount());
 
-        User sender = userRepository.findByUsername(request.senderUsername())
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String loggedUsername;
+
+        if (principal instanceof UserDetails userDetails) {
+            loggedUsername = userDetails.getUsername();
+        } else {
+            throw new RuntimeException("Usuário não autenticado");
+        }
+
+        User sender = userRepository.findByUsername(loggedUsername)
                 .orElseThrow(() -> {
-                    log.error("Usuário remetente '{}' não encontrado", request.senderUsername());
+                    log.error("Usuário logado '{}' não encontrado", loggedUsername);
                     return new UserNotFoundException("Remetente não encontrado");
                 });
 
@@ -111,7 +128,6 @@ public class TransactionService {
     }
 
     /**
-     * Gera um QR Code (token) para recebimento de pagamentos.
      * 
      * @param username nome de usuário do receptor
      * @param amount   valor esperado (opcional, pode ser null para flexível)
@@ -138,7 +154,6 @@ public class TransactionService {
 
         log.info("QR Code gerado com sucesso. Token: {}", token.getToken());
 
-     
         String qrCodeBase64 = "";
         try {
             qrCodeBase64 = qrCodeService.generateQRCodeBase64(token.getToken());
@@ -150,8 +165,66 @@ public class TransactionService {
                 token.getToken(),
                 qrCodeBase64,
                 token.getCreatedAt(),
-                token.getExpiresAt()
-                );
+                token.getExpiresAt());
+    }
+
+    @Transactional
+    public Transaction transfer(TransferRequestDTO request) throws AccountNotFoundException {
+
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        String loggedUsername;
+
+        if (principal instanceof UserDetails userDetails) {
+            loggedUsername = userDetails.getUsername();
+        } else {
+            throw new RuntimeException("Usuário não autenticado");
+        }
+
+        log.info("Iniciando transferência do usuário '{}' para '{}', valor: {}",
+                loggedUsername, request.recipientAccountNumber(), request.amount());
+
+        User sender = userRepository.findByUsername(loggedUsername)
+                .orElseThrow(() -> new UserNotFoundException("Remetente não encontrado"));
+
+        if (!passwordEncoder.matches(request.pin(), sender.getPin())) {
+            throw new InvalidPinException("PIN incorreto");
+        }
+
+        Account senderAccount = sender.getAccount();
+
+        Account recipientAccount = accountRepository
+                .findByAccountNumber(request.recipientAccountNumber())
+                .orElseThrow(() -> new AccountNotFoundException("Destinatário não encontrado"));
+
+        if (request.amount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Valor deve ser maior que zero");
+        }
+        if (request.amount().compareTo(MAX_VALUE) > 0) {
+            throw new AmountExceedsLimitException("Valor excede o limite permitido");
+        }
+        if (senderAccount.getBalance().compareTo(request.amount()) < 0) {
+            throw new InsufficientBalanceException("Saldo insuficiente");
+        }
+
+        senderAccount.setBalance(senderAccount.getBalance().subtract(request.amount()));
+        recipientAccount.setBalance(recipientAccount.getBalance().add(request.amount()));
+
+        accountRepository.save(senderAccount);
+        accountRepository.save(recipientAccount);
+
+        Transaction transaction = new Transaction();
+        transaction.setSender(senderAccount);
+        transaction.setRecipient(recipientAccount);
+        transaction.setValue(request.amount());
+        transaction.setStatus(TransationStatus.SUCCESS);
+        transaction.setTransationDate(LocalDateTime.now());
+        transaction.setReference("TX-" + System.currentTimeMillis());
+
+        transactionRepository.save(transaction);
+
+        log.info("Transferência concluída. Referência: {}", transaction.getReference());
+
+        return transaction;
     }
 
 }

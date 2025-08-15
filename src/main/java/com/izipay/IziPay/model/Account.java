@@ -33,6 +33,8 @@ public class Account {
     @Column(nullable = false, unique = true)
     private String accountNumber;
 
+    
+
     @Column(nullable = false, precision = 16, scale = 2)
     private BigDecimal balance = BigDecimal.ZERO;
 
