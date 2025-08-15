@@ -11,5 +11,6 @@ public interface AccountRepository extends JpaRepository<Account,Long>{
     Optional<Account> findByAccountNumber(String accountNumber);
     Optional<Account> findByQrCodehash(String qrCodeHash);
     boolean existsByAccountNumber(String accountNumber);
+    boolean existsByNib(String nib);
     
 }

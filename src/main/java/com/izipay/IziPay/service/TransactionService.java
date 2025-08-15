@@ -29,6 +29,7 @@ import com.izipay.IziPay.model.dto.request.PaymentRequestDTO;
 import com.izipay.IziPay.model.dto.request.TransferRequestDTO;
 import com.izipay.IziPay.model.dto.response.PaymentResponseDTO;
 import com.izipay.IziPay.model.dto.response.QrTransactionTokenResponse;
+import com.izipay.IziPay.model.enums.PaymentMethod;
 import com.izipay.IziPay.model.enums.SystemAction;
 import com.izipay.IziPay.model.enums.TransationStatus;
 import com.izipay.IziPay.repository.AccountRepository;
@@ -119,6 +120,7 @@ public class TransactionService {
         transaction.setRecipient(recipientAccount);
         transaction.setValue(request.amount());
         transaction.setStatus(TransationStatus.SUCCESS);
+        transaction.setPaymentMethod(PaymentMethod.QR_CODE);
         transaction.setTransationDate(LocalDateTime.now());
         transaction.setReference("TX-" + System.currentTimeMillis());
 
@@ -133,6 +135,7 @@ public class TransactionService {
      * @param amount   valor esperado (opcional, pode ser null para flexível)
      * @return token gerado
      */
+    @LogAction(action = SystemAction.QR_CODE_GENERATED, details = "Criacao do QR CODE para pagamentos")
     @Transactional
     public QrTransactionTokenResponse generatePaymentQrCode(String username) {
         log.info("Gerando QR Code de pagamento para usuário '{}'", username);
@@ -168,6 +171,7 @@ public class TransactionService {
                 token.getExpiresAt());
     }
 
+    @LogAction(action = SystemAction.TRANSFER_SUCESSFULLY, details = "Transferencia efectuada com sucesso")
     @Transactional
     public Transaction transfer(TransferRequestDTO request) throws AccountNotFoundException {
 
@@ -218,6 +222,7 @@ public class TransactionService {
         transaction.setValue(request.amount());
         transaction.setStatus(TransationStatus.SUCCESS);
         transaction.setTransationDate(LocalDateTime.now());
+        transaction.setPaymentMethod(PaymentMethod.ACCOUNT_NUMBER);
         transaction.setReference("TX-" + System.currentTimeMillis());
 
         transactionRepository.save(transaction);

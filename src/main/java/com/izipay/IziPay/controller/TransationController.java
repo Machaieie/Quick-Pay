@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.izipay.IziPay.model.QrTransactionToken;
 import com.izipay.IziPay.model.Transaction;
 import com.izipay.IziPay.model.dto.request.PaymentRequestDTO;
+import com.izipay.IziPay.model.dto.request.TransferRequestDTO;
 import com.izipay.IziPay.model.dto.response.PaymentResponseDTO;
 import com.izipay.IziPay.model.dto.response.QrTransactionTokenResponse;
 import com.izipay.IziPay.service.TransactionService;

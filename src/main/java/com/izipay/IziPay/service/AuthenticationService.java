@@ -37,7 +37,6 @@ import com.izipay.IziPay.model.enums.SystemAction;
 import com.izipay.IziPay.model.enums.UserState;
 import com.izipay.IziPay.repository.AccountRepository;
 import com.izipay.IziPay.repository.LoginAttemptRepository;
-import com.izipay.IziPay.repository.SystemLogRepository;
 import com.izipay.IziPay.repository.TokenRepository;
 import com.izipay.IziPay.repository.UserRepository;
 
@@ -90,14 +89,13 @@ public class AuthenticationService {
         user.setFullName(request.fullName());
         user.setPhone(request.phone());
         user.setEmail(request.email());
-        user.setUsername(accountNumber);
+        user.setUsername(request.phone());
         user.setPassword(passwordEncoder.encode(pin));
         user.setPin(passwordEncoder.encode(pin));
         user.setRole(request.role());
         user.setUserState(UserState.ACTIVE);
         user.setCreatedAt(LocalDateTime.now());
 
-        // Salva o usuário
         user = userRepository.save(user);
 
         Account account;
@@ -108,24 +106,21 @@ public class AuthenticationService {
             throw new RuntimeException("Error generating QR Code", e);
         }
 
-        // Enviar email com os dados de login
         String emailBody = """
-            <p>Olá %s,</p>
-            <p>Seja bem-vindo à IziPay! Seus dados de login foram criados com sucesso.</p>
-            <ul>
-                <li><b>Titular:</b> %s</li>
-                <li><b>Número da Conta:</b> %s</li>
-                <li><b>NIB:</b> %s</li>
-                <li><b>PIN:</b> %s</li>
-            </ul>
-            <p>Use esses dados para acessar seu perfil no aplicativo. Recomendamos alterar seu PIN após o primeiro login.</p>
-            """
-            .formatted(user.getFullName(), user.getFullName(), account.getAccountNumber(), account.getNib(), pin);
+                <p>Olá %s,</p>
+                <p>Seja bem-vindo à IziPay! Seus dados de login foram criados com sucesso.</p>
+                <ul>
+                    <li><b>Titular:</b> %s</li>
+                    <li><b>Número da Conta:</b> %s</li>
+                    <li><b>NIB:</b> %s</li>
+                    <li><b>PIN:</b> %s</li>
+                </ul>
+                <p>Use esses dados para acessar seu perfil no aplicativo. Recomendamos alterar seu PIN após o primeiro login.</p>
+                """
+                .formatted(user.getFullName(), user.getFullName(), account.getAccountNumber(), account.getNib(), pin);
 
-    emailService.send(user.getEmail(), "Bem-vindo à IziPay - Seus dados de login", emailBody);
+        emailService.send(user.getEmail(), "Bem-vindo à IziPay - Seus dados de login", emailBody);
 
-
-        // Gerar tokens
         String accessToken = jwtService.generateToken(user);
         String refreshToken = jwtService.generateRefreshToken(user);
 
@@ -141,7 +136,7 @@ public class AuthenticationService {
 
         account.setAccountNumber(userAccount);
         account.setBalance(BigDecimal.ZERO);
-account.setNib(generateUniqueNIB());
+        account.setNib(generateUniqueNIB());
         String qrCodeBase64 = qrCodeService.generateQRCodeBase64(userAccount);
         account.setQrCodehash(qrCodeBase64);
         account.setQrCodeImage(qrCodeBase64);
@@ -160,59 +155,58 @@ account.setNib(generateUniqueNIB());
         return accountNumber;
     }
 
-   @LogAction(action = SystemAction.LOGIN_SUCCESS, details = "Login bem-sucedido")
-public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO ,HttpServletRequest httpRequest) {
-    boolean success = false;
+    @LogAction(action = SystemAction.LOGIN_SUCCESS, details = "Login bem-sucedido")
+    public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO, HttpServletRequest httpRequest) {
+        boolean success = false;
 
-    User user = userRepository.findByUsername(loginRequestDTO.username())
-            .orElseThrow(() -> new UserNotFoundException("User not found"));
+        User user = userRepository.findByUsername(loginRequestDTO.phone())
+                .orElseThrow(() -> new UserNotFoundException("User not found"));
 
-    if (user.isBlocked()) {
-        throw new UserBlockedException("Account is blocked due to multiple failed login attempts");
-    }
-
-    String ipAddress = httpRequest.getRemoteAddr();
-    String deviceInfo = httpRequest.getHeader("User-Agent");
-
-    try {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(loginRequestDTO.username(), loginRequestDTO.password()));
-
-        user.setFailedAttempts(0);
-        userRepository.save(user);
-
-        success = true;
-
-        String accessToken = jwtService.generateToken(user);
-        String refreshToken = jwtService.generateRefreshToken(user);
-
-        revokeAllTokenByUser(user);
-        saveUserToken(accessToken, refreshToken, user);
-
-        return new AuthenticationResponse(accessToken, refreshToken, "User login successful");
-
-    } catch (BadCredentialsException ex) {
-        int attempts = user.getFailedAttempts() + 1;
-        user.setFailedAttempts(attempts);
-
-        if (attempts >= 3) {
-            user.setUserState(UserState.BLOCKED);
+        if (user.isBlocked()) {
+            throw new UserBlockedException("Account is blocked due to multiple failed login attempts");
         }
 
-        userRepository.save(user);
-        throw new InvalidCredentialsException("Invalid username or password");
-    } finally {
-        // registra tentativas de login
-        LoginAttempt attempt = new LoginAttempt();
-        attempt.setUser(user);
-        attempt.setStatus(success ? AttemptStatus.SUCCESS : AttemptStatus.FAILED);
-        attempt.setIpAddress(ipAddress);
-        attempt.setDeviceInfo(deviceInfo);
-        attempt.setAttemptedAt(LocalDateTime.now());
-        loginAttemptRepository.save(attempt);
-    }
-}
+        String ipAddress = httpRequest.getRemoteAddr();
+        String deviceInfo = httpRequest.getHeader("User-Agent");
 
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(loginRequestDTO.phone(), loginRequestDTO.password()));
+
+            user.setFailedAttempts(0);
+            userRepository.save(user);
+
+            success = true;
+
+            String accessToken = jwtService.generateToken(user);
+            String refreshToken = jwtService.generateRefreshToken(user);
+
+            revokeAllTokenByUser(user);
+            saveUserToken(accessToken, refreshToken, user);
+
+            return new AuthenticationResponse(accessToken, refreshToken, "User login successful");
+
+        } catch (BadCredentialsException ex) {
+            int attempts = user.getFailedAttempts() + 1;
+            user.setFailedAttempts(attempts);
+
+            if (attempts >= 3) {
+                user.setUserState(UserState.BLOCKED);
+            }
+
+            userRepository.save(user);
+            throw new InvalidCredentialsException("Invalid username or password");
+        } finally {
+            // registra tentativas de login
+            LoginAttempt attempt = new LoginAttempt();
+            attempt.setUser(user);
+            attempt.setStatus(success ? AttemptStatus.SUCCESS : AttemptStatus.FAILED);
+            attempt.setIpAddress(ipAddress);
+            attempt.setDeviceInfo(deviceInfo);
+            attempt.setAttemptedAt(LocalDateTime.now());
+            loginAttemptRepository.save(attempt);
+        }
+    }
 
     private void revokeAllTokenByUser(User user) {
         List<Token> validTokens = tokenRepository.findAllAccessTokensByUser(user.getId());
@@ -269,10 +263,10 @@ public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO ,Http
 
     @LogAction(action = SystemAction.PIN_RESET, details = "PIN redefinido")
     @Transactional
-    public String resetPinByEmail(String email) {
-        Optional<User> userOpt = userRepository.findByEmail(email);
+    public String resetPinByEmail(String phone) {
+        Optional<User> userOpt = userRepository.findByphone(phone);
         if (userOpt.isEmpty()) {
-            throw new IllegalArgumentException("E-mail não encontrado");
+            throw new IllegalArgumentException("telefone não encontrado");
         }
 
         User user = userOpt.get();
@@ -297,16 +291,15 @@ public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO ,Http
         return String.valueOf(pin);
     }
 
-private String generateUniqueNIB() {
-    String nib;
-    Random random = new Random();
+    private String generateUniqueNIB() {
+        String nib;
+        Random random = new Random();
 
-    do {
-        // Gera NIB com 21 dígitos
-        nib = String.format("%021d", Math.abs(random.nextLong()) % 1_000_000_000_000_000_000L);
-    } while (accountRepository.existsByNib(nib));
+        do {
+            nib = String.format("%021d", Math.abs(random.nextLong()) % 1_000_000_000_000_000_000L);
+        } while (accountRepository.existsByNib(nib));
 
-    return nib;
-}
+        return nib;
+    }
 
 }
