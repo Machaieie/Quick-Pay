@@ -36,4 +36,16 @@ public class TransationController {
         QrTransactionTokenResponse token = transactionService.generatePaymentQrCode(username);
         return ResponseEntity.ok(token);
     }
+
+@PostMapping("/transfer")
+public ResponseEntity<PaymentResponseDTO> transfer(@RequestBody TransferRequestDTO request) {
+    try {
+        transactionService.transfer(request);
+        return ResponseEntity.ok(new PaymentResponseDTO("Transferência realizada com sucesso."));
+    } catch (Exception e) {
+        return ResponseEntity.badRequest()
+                .body(new PaymentResponseDTO("Erro ao processar transferência: " + e.getMessage()));
+    }
+}
+
 }
