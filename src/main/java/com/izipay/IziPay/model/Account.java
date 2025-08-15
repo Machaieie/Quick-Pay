@@ -34,6 +34,8 @@ public class Account {
     private String accountNumber;
 
     
+    @Column(nullable = false, unique = true, length = 25) 
+    private String nib;
 
     @Column(nullable = false, precision = 16, scale = 2)
     private BigDecimal balance = BigDecimal.ZERO;
