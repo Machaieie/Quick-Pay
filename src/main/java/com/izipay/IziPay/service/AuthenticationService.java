@@ -110,17 +110,20 @@ public class AuthenticationService {
 
         // Enviar email com os dados de login
         String emailBody = """
-                <p>Olá %s,</p>
-                <p>Seja bem-vindo à IziPay! Seus dados de login foram criados com sucesso.</p>
-                <ul>
-                    <li><b>Número da Conta:</b> %s</li>
-                    <li><b>PIN:</b> %s</li>
-                </ul>
-                <p>Use esses dados para acessar seu perfil no aplicativo. Recomendamos alterar seu PIN após o primeiro login.</p>
-                """
-                .formatted(user.getFullName(), accountNumber, pin);
+            <p>Olá %s,</p>
+            <p>Seja bem-vindo à IziPay! Seus dados de login foram criados com sucesso.</p>
+            <ul>
+                <li><b>Titular:</b> %s</li>
+                <li><b>Número da Conta:</b> %s</li>
+                <li><b>NIB:</b> %s</li>
+                <li><b>PIN:</b> %s</li>
+            </ul>
+            <p>Use esses dados para acessar seu perfil no aplicativo. Recomendamos alterar seu PIN após o primeiro login.</p>
+            """
+            .formatted(user.getFullName(), user.getFullName(), account.getAccountNumber(), account.getNib(), pin);
 
-        emailService.send(user.getEmail(), "Bem-vindo à IziPay - Seus dados de login", emailBody);
+    emailService.send(user.getEmail(), "Bem-vindo à IziPay - Seus dados de login", emailBody);
+
 
         // Gerar tokens
         String accessToken = jwtService.generateToken(user);
@@ -138,7 +141,7 @@ public class AuthenticationService {
 
         account.setAccountNumber(userAccount);
         account.setBalance(BigDecimal.ZERO);
-
+account.setNib(generateUniqueNIB());
         String qrCodeBase64 = qrCodeService.generateQRCodeBase64(userAccount);
         account.setQrCodehash(qrCodeBase64);
         account.setQrCodeImage(qrCodeBase64);
@@ -293,5 +296,17 @@ public AuthenticationResponse authenticate(LoginRequestDTO loginRequestDTO ,Http
         int pin = random.nextInt(9000) + 1000;
         return String.valueOf(pin);
     }
+
+private String generateUniqueNIB() {
+    String nib;
+    Random random = new Random();
+
+    do {
+        // Gera NIB com 21 dígitos
+        nib = String.format("%021d", Math.abs(random.nextLong()) % 1_000_000_000_000_000_000L);
+    } while (accountRepository.existsByNib(nib));
+
+    return nib;
+}
 
 }
