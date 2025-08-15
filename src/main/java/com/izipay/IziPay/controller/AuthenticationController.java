@@ -43,4 +43,19 @@ public class AuthenticationController {
     public ResponseEntity<?> refreshToken(HttpServletRequest request, HttpServletResponse response) {
         return authenticationService.refreshToken(request, response);
     }
+
+    @PostMapping("/reset-pin/{phone}")
+    public ResponseEntity<String> resetPin(@PathVariable String phone) {
+        String result = authenticationService.resetPinByEmail(phone);
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<String> logout(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            return ResponseEntity.badRequest().body("Token não informado");
+        }
+        return ResponseEntity.ok("Logout realizado com sucesso");
+    }
 }
